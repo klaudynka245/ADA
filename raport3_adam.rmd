@@ -1,0 +1,784 @@
+---
+title: "Sprawozdanie 3"
+subtitle: "Analiza Danych Ankietowych"
+author: "Mateusz Machaj (262288), Adam Kawałko (262329)"
+date: "26.05.2023"
+output: 
+  bookdown::pdf_document2:
+    toc: false
+    number_sections: false
+header-includes:
+  - \usepackage{float}
+---
+\renewcommand{\tablename}{Tabela}
+\renewcommand{\figurename}{Rysunek}
+
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.width=8)
+options(digits = 3, warn=-1)    
+library(tidyverse)
+library(kableExtra)
+library(gnm)
+```
+
+  
+```{r datafetch}
+personel <- read.csv2(
+  file = "personel.csv",
+  col.names = c ("D", "S",
+                 "A1", "A2", "W1", "W2", "P", "Wiek", "Wyk"),
+  header = FALSE
+)
+personel$A2 <- replace(personel$A2, personel$A2 == 11, 1)
+personel <- personel %>% mutate(across(D:Wyk, as.factor))
+```
+
+# Wstęp
+
+```{r head}
+personel  %>% head()  %>% kable(caption = "Fragment tabeli analizowanych danych dotyczących personelu.", label = "head") 
+```
+
+W naszym raporcie zaprezentujemy funkcjonalność pakietu _R_ związaną z analizami dla badań wykonywanych kilkukrotnie, modelami log-liniowymi oraz zaawansowanymi przypadkami badania niezależności. Odpowiemy na problemy zawarte w zadaniach zestawu trzeciego.
+
+Będziemy w praktyczny sposób stosować funkcje zarówno dostępne w bibliotekach _R_, jak i samodzielnie zaimplementowane. Wykonamy też badania, pozwalające na lepsze zrozumienie działania testów. W zadaniach, które dotyczą otrzymanych danych zakładamy, że zostały przeprowadzone badania na dwustu pracownikach pewnej, dużej korporacji. Zadawano im konkretne pytania, na które musieli podać jedną z dostępnych odpowiedzi. Sprawdzano między innymi wiek, wykształcenie czy dział zatrudnienia. W przykładach kodu tabela z tymi danymi jest przechowywana w zmiennej `personel`. Kilka zaś jej wierszy przedstawiamy poglądowo w tab. \@ref(tab:head) 
+
+Używamy w analizach następującej konwencji nazewniczej kolumn:
+
+- __D__ -- Dział zatrudnienia pracownika (Z -- zaopatrzenia, P -- produkcyjny, S -- sprzedaży/marketingu, O -- obsługi kadrowo-płacowej).
+- __S__ -- Stanowisko (1 jeśli kierownicze, w przeciwnym razie 0).
+- __A1__ -- Zadowolenie z atmosfery w pierwszym badanym okresie (w skali od $-2$ do $2$).
+- __A2__ -- Zadowolenie z atmosfery w drugim badanym okresie (w skali od $-2$ do $2$).
+- __W1__ -- Zadowolenia z wynagrodzenia w pierwszym badanym okresie (w skali od $-2$ do $2$ bez 0).
+- __W2__ -- Zadowolenia z wynagrodzenia w drugim badanym okresie (w skali od $-2$ do $2$ bez 0).
+- __P__ -- Płeć (K, M).
+- __Wiek__ -- Przedział wiekowy pracownika (skala od 1 do 4 obejmuje w latach grupy $<26$, $26-35$, $36-50$ oraz $>50$).
+- __Wyk__ -- Rodzaj wykształcenia (zawodowe - $1$, średnie - $2$, wyższe $3$).
+
+Jeżeli chodzi o poziom istotności, na którym wykonywano testy, jeśli nie podano inaczej, jest to zawsze \(\alpha = 0.05\).
+
+
+# Część I
+
+## Zadanie 1
+
+W pierwszym zadaniu zweryfikujemy hipotezę, że atmosfera w miejscu pracy w pierwszym badanym okresie oraz po roku od pierwszego badania odpowiada modelowi symetrii.
+
+Najpierw próbujemy wykonać test McNemary. Używamy do tego takiego kodu, jak poniżej.
+
+```{r c1a, eval=FALSE, echo=TRUE}
+ftable(personel$A1, personel$A2) %>% as.table() %>% mcnemar.test()
+```
+
+```{r 1a}
+ftable(personel$A1, personel$A2) %>% as.table() %>% kable(label="1kable", caption = "Odpowiedzi ankietowanych w podziale na zadowolenie z atmosfery w pierwszym okresie (wiersze) oraz drugim okresie (kolumny).")
+
+# ftable(personel$A1, personel$A2) %>% as.table() %>% mcnemar.test()
+```
+
+Okazuje się, że p-wartość nie istnieje. Dzieje się tak, ponieważ dla naszych danych w macierzy istnieją zera na odpowiadających sobie miejscach. Można to łatwo zaobserwować w tab. \@ref(tab:1kable).
+
+Mimo to, możemy ciagle zastosować test oparty na ilorazie wiarygodności:
+
+```{r c1b, eval=FALSE, echo=TRUE}
+grps <- personel %>% select(c(A1, A2)) %>% group_by(A1, A2, .drop = F) %>% count()
+symmetry <- glm(n ~ Symm(A1, A2), data = grps, family = poisson)
+p <- 1 - pchisq(symmetry$deviance, symmetry$df.residual)
+```
+
+```{r 1b}
+grps <-
+  personel %>% select(c(A1, A2)) %>% group_by(A1, A2, .drop = F) %>% count()
+symmetry <- glm(n ~ Symm(A1, A2), data = grps, family = poisson)
+p.zad1 <- 1 - pchisq(symmetry$deviance, symmetry$df.residual)
+```
+
+Otrzymujemy p-wartość \(`r p.zad1`\). Jest ona większa od poziomu \(\alpha=0.05\), zatem przyjmujemy hipotezę zerową. Uznajemy, że zadowolenie z atmosfery nie zmieniło się wraz z okresem.
+
+
+## Zadanie 2
+
+W kolejnym zadaniu zarówno problem jak i rozwiązanie są analogiczne. Nie przyglądamy się natomiast zadowoleniu z atmosfery a wynagrodzenia w dwóch badanych okresach.
+
+
+```{r 2a}
+ftable(personel$W1, personel$W2) %>% as.table() %>% kable(label="2kable", caption = "Odpowiedzi ankietowanych w podziale na zadowolenie z wynagrodzenia w pierwszym okresie (wiersze) oraz drugim okresie (kolumny).")
+# ftable(personel$W1, personel$W2) %>% as.table() %>% mcnemar.test()
+```
+
+```{r 2b}
+grps <-
+  personel %>% select(c(W1, W2)) %>% group_by(W1, W2, .drop = F) %>% count()
+symmetry <- glm(n ~ Symm(W1, W2), data = grps, family = poisson)
+p.zad2 <- 1 - pchisq(symmetry$deviance, symmetry$df.residual)
+```
+
+Okazuje się, iż z tego samego powodu co poprzednio (wystarczy spojrzeć na tab. \@ref(tab:2kable)), test McNemary nie może zwrócić żadnej p-wartości. Z problemem radzimy sobie dzięki testowi opartemu na ilorazie wiarygodności i znów przyjmujemy \(H_0\), z p-wartością na poziomie \(`r p.zad2`\). Nie ma powodu aby sądzić, iż zadowolenie z wynagrodzenia zmieniło się w czasie.
+
+
+
+## Zadanie 3
+
+```{r 4tests}
+sym.z.test <- function(x) {
+  P <- (x / sum(x)) %>% as.table()
+  D <- (rowSums(P)[1] - colSums(P)[1]) %>% as.numeric()
+  # sigma
+  sg <- sqrt((
+    rowSums(P)[1] * (1 - rowSums(P)[1])
+    +  colSums(P)[1] * (1 - colSums(P)[1])
+    - 2 * (P[1, 1] * P[2, 2] - P[1, 2] * P[2, 1])
+  ) / sum(x)) %>% as.numeric()
+  # stat
+  z <- D / sg
+  # p-value
+  p <- 2 * (1 - pnorm(abs(z)))
+  return(p)
+}
+
+sym.z0.test <- function(x) {
+  # stat
+  z0 <- (x[1, 2] - x[2, 1]) / sqrt((x[1, 2] + x[2, 1]))
+  # p-value
+  p <- 2 * (1 - pnorm(abs(z0)))
+  return(p)
+}
+
+```
+
+
+```{r 3prep}
+personel$WM1 <- ((personel$W1 %>% as.numeric() > 2) %>% as.numeric() * 2 - 1 ) %>% as.factor()
+personel$WM2 <- ((personel$W2 %>% as.numeric() > 2) %>% as.numeric() * 2 - 1 ) %>% as.factor()
+p.zad3.mn <- ftable(personel$WM1, personel$WM2) %>% as.table() %>% mcnemar.test()
+p.zad3.z <- table(personel$WM1, personel$WM2) %>% sym.z.test()
+p.zad3.z0 <- table(personel$WM1, personel$WM2) %>% sym.z0.test()
+
+ftable(personel$WM1, personel$WM2) %>% as.table() %>% kable(label="3kable", caption = "Odpowiedzi ankietowanych skonsolidowane do negatywnych i pozytywnych w podziale na zadowolenie z wynagrodzenia w pierwszym okresie (wiersze) oraz drugim okresie (kolumny).")
+```
+
+W tym zadaniu ponownie podejdziemy do badania zadowolenia z wynagrodzenia w czasie, ale skonsolidujemy oba poziomy negatywnych odpowiedzi do jednej i to samo z pozytywnymi. Rezultat przedstawiony jest bardzo przejrzyście w tab. \@ref(tab:3kable).
+
+Jak można się domyślać, tym razem p-wartość w teście McNemary istnieje. Wynosi ona \(`r p.zad3.mn$p.value`\), a zatem nie odrzucamy hipotezy zerowej. Teraz też tabla ma z resztą wymagany dla testu wymiar 2x2. Poziomy krytyczne uzyskane w testach \(Z\) i \(Z_0\) to odpowiednio \(`r p.zad3.z`\) oraz \(`r p.zad3.z0`\). Nie ma zatem w ogóle podstaw do sądzenia, że zaszły znaczne zmiany w nastrojach odnośnie wyngrodzenia.
+
+
+## Zadanie 4
+
+To zadanie zaczniemy od prezentacji zaimplementowanych testów \(Z\) oraz \(Z_0\) symetrii.
+
+```{r, eval=FALSE, echo=TRUE}
+sym.z.test <- function(x) {
+  P <- (x / sum(x)) %>% as.table()
+  D <- (rowSums(P)[1] - colSums(P)[1]) %>% as.numeric()
+  # sigma
+  sg <- sqrt((
+    rowSums(P)[1] * (1 - rowSums(P)[1])
+    +  colSums(P)[1] * (1 - colSums(P)[1])
+    - 2 * (P[1, 1] * P[2, 2] - P[1, 2] * P[2, 1])
+  ) / sum(x)) %>% as.numeric()
+  # stat
+  z <- D / sg
+  # p-value
+  p <- 2 * (1 - pnorm(abs(z)))
+  return(p)
+} 
+```
+
+```{r, eval=FALSE, echo=TRUE}
+sym.z0.test <- function(x) {
+  # stat
+  z0 <- (x[1, 2] - x[2, 1]) / sqrt((x[1, 2] + x[2, 1]))
+  # p-value
+  p <- 2 * (1 - pnorm(abs(z0)))
+  return(p)
+}
+```
+
+Obie funkcje bazują na wzorach podanych na wykładzie.
+
+Korzystając z p-wartości wyznaczanych przez te funkcje, będziemy teraz badać moce obu testów. W symulacjach używać będziemy dwóch prób z rozkładu dwupunktowego o różnych rozmiarach -- $n \in \{20, 50, 100, 1000\}$. Pierwsza z prób będzie miała prawdopodobieństwo sukcesu równe $p_1 = 0.5$, a druga zmienne $p_2 \in (0, 1)$. Przy liczbie powtórzeń Monte Carlo $M = 1000$ będziemy sprawdzać, ile odrzuceń fałszywych hipotez otrzymujemy. 
+
+
+
+```{r}
+samples.X <- rbinom(10, 1, 0.5) %>% factor(levels = c(0, 1))
+samples.Y <- rbinom(10, 1, 0.3) %>% factor(levels = c(0, 1))
+cm <- ftable(samples.X, samples.Y)
+```
+
+
+
+```{r 4}
+rejected.falses.part <- function(test, n, p2){
+  samples.X <- rbinom(n, 1, 0.5) %>% factor(levels = c(0, 1))
+  samples.Y <- rbinom(n, 1, p2) %>% factor(levels = c(0, 1))
+  cm <- ftable(samples.X, samples.Y)
+  if (test == "Z") {
+    p = sym.z.test(cm)
+  }
+  else if (test == "Z0") {
+    p = sym.z0.test(cm)
+  }
+  return(p <= 0.05)
+}
+
+rejected.falses <- function(test, n, p2, M) {
+  samples <- replicate(M, rejected.falses.part(test, n, p2))
+  return(mean(samples, na.rm = T))
+}
+
+data.rejected.falses <-
+    expand.grid(
+      test = c("Z", "Z0"),
+            n = c(20, 50, 100, 1000),
+            p2 = seq(0.01, 0.99, by = 0.01)
+    )
+
+```
+
+```{r 4simul}
+# nie wywalać bo to liczy rzeczy!!!!! ale jest zakomentowane bo bardzo długo
+# dlatego wczytujemy policzne wcześniej z pliku!!!!!!!!!!!!!!!!!!!!!!
+
+###### SIMUL AND SAVE ###### 
+# data.rejected.falses$pw <- mapply(rejected.falses, data.rejected.falses$test, data.rejected.falses$n,  data.rejected.falses$p2, 1000)
+
+# write.csv(data.rejected.falses, file = "data4.csv")
+
+###### READ ###### 
+data.rejected.falses <- read.csv("data4.csv")
+```
+
+```{r 4fig1, fig.cap="Moce testów $Z$ i $Z_0$ dla różnych prawdopodobieństw $p_2$ oraz stałego $p_1 = 0.5$, na poziomie $\\alpha=0.05$. Rozmiar prób wynosi tu $n=20$."}
+
+ggplot(data.rejected.falses %>% filter(n == 20), mapping = aes(x = p2, y=pw, color=test)) + geom_line() + geom_hline(yintercept = 0.05, linetype = "dashed") + ylab("Power of a test") + xlab("Probability in the second sample")
+```
+
+
+```{r 4fig2, fig.cap="Moce testów $Z$ i $Z_0$ dla różnych prawdopodobieństw $p_2$ oraz stałego $p_1 = 0.5$, na poziomie $\\alpha =0.05$. Rozmiar prób wynosi tu $n=50$."}
+
+ggplot(data.rejected.falses %>% filter(n == 50), mapping = aes(x = p2, y=pw, color=test)) + geom_line() + geom_hline(yintercept = 0.05, linetype = "dashed") + ylab("Power of a test") + xlab("Probability in the second sample")
+```
+
+
+```{r 4fig3, fig.cap="Moce testów $Z$ i $Z_0$ dla różnych prawdopodobieństw $p_2$ oraz stałego $p_1 = 0.5$, na poziomie $\\alpha =0.05$. Rozmiar prób wynosi tu $n=100$."}
+
+ggplot(data.rejected.falses %>% filter(n == 100), mapping = aes(x = p2, y=pw, color=test)) + geom_line() + geom_hline(yintercept = 0.05, linetype = "dashed") + ylab("Power of a test") + xlab("Probability in the second sample")
+```
+
+
+```{r 4fig4, fig.cap="Moce testów $Z$ i $Z_0$ dla różnych prawdopodobieństw $p_2$ oraz stałego $p_1 = 0.5$, na poziomie $\\alpha=0.05$. Rozmiar prób wynosi tu $n=1000$."}
+
+ggplot(data.rejected.falses %>% filter(n == 1000), mapping = aes(x = p2, y=pw, color=test)) + geom_line() + geom_hline(yintercept = 0.05, linetype = "dashed") + ylab("Power of a test") + xlab("Probability in the second sample")
+```
+
+Analizując wyniki w formie wykresów w porównaniu z poziomem istotności zauważamy, że dla małych $n$ (rys. \@ref(fig:4fig1)) test $Z$ cechuje się znacznie większą od testu $Z_0$ mocą dla całego zakresu $p_2$. Różnica pomiędzy wartościami jest też generalnie podobna. Można jedynie zauważać podobne do siebie wyniki w okolicach bardzo bliskich brzegom przedziału $(0,\,1)$. Tam p-wartości zbliżają się do jedynki, pozostając na podobnym poziomie. Warto też zauważyć, że gdy hipoteza zerowa jest prawdziwa, test $Z$ ma wyraźnie większą moc, niż poziom istotności. Nie jest to prawdą dla testu $Z_0$.
+
+Patrząc na dalsze ilustracje -- rys. \@ref(fig:4fig2) - \@ref(fig:4fig4) obserwujemy, że różnica w mocach pomiędzy omawianymi testami zanika wraz ze wzrostem $n$. Dla $n=50$, czyli na rys. \@ref(fig:4fig2), jest już właściwie w ogóle nie widoczna. P-wartości na tych trzech wykresach w przypadku $p_2=p_1$ zdają się pozostawać dokładnie na poziomie $\alpha$ już w obu przypadkach. Widziomy też, że im większe $n$, tym szerszy zakres $p_2$ może cieszyć się mocą niemalże równą $1$. Podczas, gdy dla $n=100$ i obu testów, przy $|p_2-p_1|=0.1$, $\beta_\varphi(p_2) < 0.5$ (rys. \@ref(fig:4fig3)). Gdy mamy do czynienia z dziesięciokrotnie większym $n$ (rys. \@ref(fig:4fig4)), o teij samej funkcj mocy we wspomnianych punktach powiemy, że $\beta_\varphi(p_2) \approx 1$.
+
+
+# Część II
+
+## Zadanie 5 \label{zad5}
+
+Rozpatrzymy teraz modele log-liniowe dla różnych zmiennych. W tym zadaniu przyjmiemy za zmienną 1 zajmowane stanowisko (_S_), za 2 -- zadowolenie z wynagrodzenia w pierwszym okresie (_W1_), a przez 3 rozumiemy wykształcenie (_Wyk_). Będziemy rozważać kolejne modele, podając ich interpretację oraz przewidywania.
+
+
+```{r 5a}
+personel.s_w1_wyk <- personel %>% group_by(S, W1, Wyk, .drop=F) %>% count()
+mod5a <- glm(n ~ S + Wyk, data = personel.s_w1_wyk, family = poisson)
+cbind(mod5a$data, fitted_n=fitted(mod5a)) %>% mutate("abs_error" = abs(n - fitted_n)) %>% kable(caption = "Zestawienie predykcji i empirycznych wartości w grupach dla modelu log-liniowego [1 3] i zmiennych 1 - S, 2 - W1, 3 - Wyk.", label = "tab5a")
+```
+
+### Model [1 3]
+
+Zakładamy, że stanowisko i wykształcenie mają dowolne rozkłady, a zadowolenie z wynagrodzenia rozkład równomierny. Dodatkowo, wszystkie te zmienne są niezależne. 
+
+Mając liczności w grupach w tabeli `personel.s_w1_wyk`, wywołujemy funkcję `glm` z następującymi argumentami:
+
+```{r code5a, eval=FALSE, echo=TRUE}
+glm(n ~ S + Wyk, data = personel.s_w1_wyk, family = poisson)
+```
+
+Po wynikach z tab. \@ref(tab:tab5a) widzimy, iż niektóre z kategorii predykowane są z dość małym błędem względem zebranych danych. Niestety w ogólnym sensie, wartości dopasowane w ogóle nie przypominają empirycznych.  
+
+```{r 5b}
+mod5b <- glm(n ~ S + Wyk + S * Wyk, data = personel.s_w1_wyk, family = poisson)
+cbind(mod5b$data, fitted_n=fitted(mod5b)) %>% mutate("abs_error" = abs(n - fitted_n)) %>% kable(caption = "Zestawienie predykcji i empirycznych wartości w grupach dla modelu log-liniowego [13] i zmiennych 1 - S, 2 - W1, 3 - Wyk.", label = "tab5b")
+```
+
+
+### Model [13]
+
+Zakładamy, że stanowisko i wykształcenie mają dowolne rozkłady, a zadowolenie z wynagrodzenia rozkład równomierny. Dodatkowo, zadowolenie z wynagrodzenia jest niezależne od stanowiska i od wykształcenia, ale samo stanowisko i wykształecenie nie są niezależne.
+
+Wywołujemy tym razem
+
+```{r code5b, eval=FALSE, echo=TRUE}
+glm(n ~ S + Wyk + S * Wyk, data = personel.s_w1_wyk, family = poisson)
+```
+
+Dopasowanie z tab. \@ref(tab:tab5b) ciągle nie satysfakcjonuje. Taki model nie wydaje się być dobrym kandydatem. 
+
+```{r 5c}
+mod5c <- glm(n ~ S + W1 + Wyk, data = personel.s_w1_wyk, family = poisson)
+cbind(mod5c$data, fitted_n=fitted(mod5c)) %>% mutate("abs_error" = abs(n - fitted_n)) %>% kable(caption = "Zestawienie predykcji i empirycznych wartości w grupach dla modelu log-liniowego [1 2 3] i zmiennych 1 - S, 2 - W1, 3 - Wyk.", label = "tab5c")
+```
+
+
+
+### Model [1 2 3]
+
+Zakładamy, że stanowisko, zadowolenie z wynagrodzenia oraz wykształcenie, mają dowolne rozkłady. Wszystkie te zmienne są zaś wzajemnie niezależne.
+
+
+```{r code5c, eval=FALSE, echo=TRUE}
+glm(n ~ S + W1 + Wyk, data = personel.s_w1_wyk, family = poisson)
+```
+
+Tym razem w tab. \@ref(tab:tab5c) odczytujemy już poprawę zachowania. Nie ma już spotykanych wcześniej predykcji na poziomi $30$ podczas, gdy wartości w oryginalnych danych były równe $0$. Przy liczbie $200$ ankietowanych i $24$ grupach danych był to istotnie nieporządany rezultat. Tu błąd bezwzględny w ogóle nie przekracza poziomu $6$. Wygląda na to, iż żadna ze zmiennych nie ma równomiernego rozkładu.
+
+```{r 5d}
+mod5d <- glm(n ~ S + W1 + Wyk + S * W1, data = personel.s_w1_wyk, family = poisson)
+cbind(mod5d$data, fitted_n=fitted(mod5d)) %>% mutate("abs_error" = abs(n - fitted_n)) %>% kable(caption = "Zestawienie predykcji i empirycznych wartości w grupach dla modelu log-liniowego [12 3] i zmiennych 1 - S, 2 - W1, 3 - Wyk.", label = "tab5d")
+```
+
+
+### Model [12 3]
+
+Zakładamy, że stanowisko, zadowolenie z wynagrodzenia oraz wykształcenie, mają dowolne rozkłady. Wykształcenie jest niezależne od stanowiska i zadowolenia z wynagrodznia, ale samo stanowisko oraz zadowolenie z wynagrodznia nie są niezależne.
+
+```{r code5d, eval=FALSE, echo=TRUE}
+glm(n ~ S + W1 + Wyk + S * W1, data = personel.s_w1_wyk, family = poisson)
+```
+
+Dla kolejnego modelu nie obserwujemy istotnej poprawy, chodziaż po dodaniu jednej zależności można zaobserwować nieco lepsze wyniki w tab. \@ref(tab:tab5d).
+
+```{r 5e}
+mod5e <- glm(n ~ S + W1 + Wyk + S * W1 + S * Wyk, data = personel.s_w1_wyk, family = poisson)
+cbind(mod5e$data, fitted_n=fitted(mod5e)) %>% mutate("abs_error" = abs(n - fitted_n)) %>% kable(caption = "Zestawienie predykcji i empirycznych wartości w grupach dla modelu log-liniowego [12 13] i zmiennych 1 - S, 2 - W1, 3 - Wyk.", label = "tab5e")
+```
+
+
+### Model [12 13]
+
+Zakładamy, że stanowisko, zadowolenie z wynagrodzenia oraz wykształcenie, mają dowolne rozkłady. Do tego, przy ustalonym stanowisku, wykształcenie i zadowolenie z wynagrodzenia są niezależne (_W1_ i _Wyk_ są warunkowo niezależne).
+
+```{r code5e, eval=FALSE, echo=TRUE}
+glm(n ~ S + W1 + Wyk + S * W1 + S * Wyk, data = personel.s_w1_wyk, family = poisson)
+```
+
+Dla kolejnego przykładu -- z tab. \@ref(tab:tab5e) -- można powiedzieć, że wyniki są znów lepsze, choćby dlatego, że maksymalny błąd się zmniesza.
+
+```{r 5f}
+mod5f <- glm(n ~ S + W1 + Wyk + W1 * Wyk, data = personel.s_w1_wyk, family = poisson)
+cbind(mod5f$data, fitted_n=fitted(mod5f)) %>% mutate("abs_error" = abs(n - fitted_n)) %>% kable(caption = "Zestawienie predykcji i empirycznych wartości w grupach dla modelu log-liniowego [1 23] i zmiennych 1 - S, 2 - W1, 3 - Wyk.", label = "tab5f")
+```
+
+
+### Model [1 23]
+
+Zakładamy, że stanowisko, zadowolenie z wynagrodzenia oraz wykształcenie, mają dowolne rozkłady. Stanowisko jest niezależne od wykształcenia i zadowolenia z wynagrodznia, ale samo wykształcenie oraz zadowolenie z wynagrodznia nie są niezależne.
+
+```{r code5f, eval=FALSE, echo=TRUE}
+glm(n ~ S + W1 + Wyk + W1 * Wyk, data = personel.s_w1_wyk, family = poisson)
+```
+
+Ostatecznie, dochodzimy do wniosku, że z zaproponowanej listy warto wybrać ostatni model. Choć obejmuje mniej zależności pomiędzy zmiennymi daje najciekawsze rezultaty (tab. \@ref(tab:tab5f)). Mówimy to w takim sensie, że błąd w żadnej grupie nie przekacza tu już nawet liczby $3$ ankietowanch. Pokazuje to, że model należy dobierać z uwzględnieniem analiz niezależności, a większa liczba powiązań w modelu wcale nie musi oznaczać lepszego dopasowania. Jeżeli oceniamy model w całości, a nie patrząc na poszczególne grupy (`deviance`), można dojść zaś do wniosku, że model [12 13] będzie najodpowiedniejszy. Oba prezentują dość podobne, dobre dopasowania.
+
+
+## Zadanie 6
+
+W tym zadaniu powtórzymy procedury z [poprzedniego zadania](#zad5). Będziemy jednak mówić o innych zmiennych: 1 -- zajmowane stanowisko (_S_), 2 – płeć (_P_), 3 -- wykształcenie (_Wyk_).
+
+
+```{r 6a}
+personel.s_p_wyk <- personel %>% group_by(S, P, Wyk, .drop=F) %>% count()
+mod6a <- glm(n ~ S + Wyk, data = personel.s_p_wyk, family = poisson)
+cbind(mod6a$data, fitted_n=fitted(mod6a)) %>% mutate("abs_error" = abs(n - fitted_n)) %>% kable(caption = "Zestawienie predykcji i empirycznych wartości w grupach dla modelu log-liniowego [1 3] i zmiennych 1 - S, 2 - P, 3 - Wyk.", label = "tab6a")
+```
+
+
+### Model [1 3]
+
+Zakładamy, że stanowisko i wykształcenie mają dowolne rozkłady, a płeć rozkład równomierny. Dodatkowo, wszystkie te zmienne są niezależne.
+
+Tutaj posłużymy się analogicznym kodem, ale już z tabelą danych `personel.s_p_wyk`, uwzględniającą inne zmienne.
+
+```{r code6a, eval=FALSE, echo=TRUE}
+glm(n ~ S + Wyk, data = personel.s_p_wyk, family = poisson)
+```
+
+Pamiętając podobny model i zmienne z poprzedniego zadania nie spodziewamy się świetnych rezultatów modelu [1 3]. Faktycznie, w tab. \@ref(tab:tab6a) zauważamy znów ogromne rozbieżności.
+
+```{r 6b}
+mod6b <- glm(n ~ S + Wyk + S * Wyk, data = personel.s_p_wyk, family = poisson)
+cbind(mod6b$data, fitted_n=fitted(mod6b)) %>% mutate("abs_error" = abs(n - fitted_n)) %>% kable(caption = "Zestawienie predykcji i empirycznych wartości w grupach dla modelu log-liniowego [13] i zmiennych 1 - S, 2 - P, 3 - Wyk.", label = "tab6b")
+```
+
+
+### Model [13]
+
+Zakładamy, że stanowisko i wykształcenie mają dowolne rozkłady, a płeć rozkład równomierny. Dodatkowo, płeć jest niezależne od stanowiska i od wykształcenia, ale samo stanowisko i wykształecenie nie są niezależne.
+
+```{r code6b, eval=FALSE, echo=TRUE}
+glm(n ~ S + Wyk + S * Wyk, data = personel.s_p_wyk, family = poisson)
+```
+
+Tab. \@ref(tab:tab5b) sugeruje zaś, że ten pomysł nie jest perfekcyjnym rozwiązaniem. W stosunku do modelu [1 3], błędy w niektórych grupach zmalały, ale w innych zauważalnie wzrosły. 
+
+```{r 6c}
+mod6c <- glm(n ~ S + P + Wyk, data = personel.s_p_wyk, family = poisson)
+cbind(mod6c$data, fitted_n=fitted(mod6c)) %>% mutate("abs_error" = abs(n - fitted_n)) %>% kable(caption = "Zestawienie predykcji i empirycznych wartości w grupach dla modelu log-liniowego [1 2 3] i zmiennych 1 - S, 2 - P, 3 - Wyk.", label = "tab6c")
+```
+
+
+### Model [1 2 3]
+
+Zakładamy, że stanowisko, płeć oraz wykształcenie, mają dowolne rozkłady. Wszystkie te zmienne są zaś wzajemnie niezależne.
+
+```{r code6c, eval=FALSE, echo=TRUE}
+glm(n ~ S + P + Wyk, data = personel.s_p_wyk, family = poisson)
+```
+
+Wprowadzenie trzech niezależnych zmiennych do modelu powoduje w tab. \@ref(tab:tab5c) spore zamieszanie. Błędy są w znacznej mierze jeszcze większe, niż wcześniej.
+
+```{r 6d}
+mod6d <- glm(n ~ S + P + Wyk + S * P, data = personel.s_p_wyk, family = poisson)
+cbind(mod6d$data, fitted_n=fitted(mod6d)) %>% mutate("abs_error" = abs(n - fitted_n)) %>% kable(caption = "Zestawienie predykcji i empirycznych wartości w grupach dla modelu log-liniowego [12 3] i zmiennych 1 - S, 2 - P, 3 - Wyk.", label = "tab6d")
+```
+
+
+### Model [12 3]
+
+Zakładamy, że stanowisko, płeć oraz wykształcenie, mają dowolne rozkłady. Wykształcenie jest niezależne od stanowiska i płci, ale samo stanowisko oraz płeć nie są niezależne.
+
+```{r code6d, eval=FALSE, echo=TRUE}
+glm(n ~ S + P + Wyk + S * P, data = personel.s_p_wyk, family = poisson)
+```
+
+Rozpoznajemy w tab. \@ref(tab:tab5d) dla takiego modelu dalej duże błędy, największy to ponad $16$, przy empirycznej liczności $39$.  
+
+```{r 6e}
+mod6e <- glm(n ~ S + P + Wyk + S * P + S * Wyk, data = personel.s_p_wyk, family = poisson)
+cbind(mod6e$data, fitted_n=fitted(mod6e)) %>% mutate("abs_error" = abs(n - fitted_n)) %>% kable(caption = "Zestawienie predykcji i empirycznych wartości w grupach dla modelu log-liniowego [12 13] i zmiennych 1 - S, 2 - P, 3 - Wyk.", label = "tab6e")
+```
+
+
+### Model [12 13]
+
+Zakładamy, że stanowisko, płeć oraz wykształcenie, mają dowolne rozkłady. Do tego, przy ustalonym stanowisku, wykształcenie i płeć są niezależne (_P_ i _Wyk_ są warunkowo niezależne).
+
+```{r code6e, eval=FALSE, echo=TRUE}
+glm(n ~ S + P + Wyk + S * P + S * Wyk, data = personel.s_p_wyk, family = poisson)
+```
+
+Taki model, jak widzimy na tab. \@ref(tab:tab5e), nie wnosi nic specjalnie dobrego. Prezentuje równie duże odchyły, jak wcześniej. 
+
+```{r 6f}
+mod6f <- glm(n ~ S + P + Wyk + P * Wyk, data = personel.s_p_wyk, family = poisson)
+cbind(mod6f$data, fitted_n=fitted(mod6f)) %>% mutate("abs_error" = abs(n - fitted_n)) %>% kable(caption = "Zestawienie predykcji i empirycznych wartości w grupach dla modelu log-liniowego [1 23] i zmiennych 1 - S, 2 - P, 3 - Wyk.", label = "tab6f")
+```
+
+### Model [1 23]
+
+Zakładamy, że stanowisko, zadowolenie z wynagrodzenia oraz wykształcenie, mają dowolne rozkłady. Stanowisko jest niezależne od wykształcenia i zadowolenia z wynagrodznia, ale samo wykształcenie oraz zadowolenie z wynagrodznia nie są niezależne.
+
+```{r code6f, eval=FALSE, echo=TRUE}
+glm(n ~ S + P + Wyk + P * Wyk, data = personel.s_p_wyk, family = poisson)
+```
+
+W widoczny sposób dla tych zmiennych zwycięża model [1 23], dając -- tak jak w tab. \@ref(tab:tab5f) -- rezultaty o najmniejszych błędach. Wnioski są podobne jak poprzednio -- warto pochylić się nad zależnościami, zanim zaczniemy dobierać model.
+
+# Część III
+
+## Zadanie 7
+
+W tym zadaniu, weźmiemy znów zmienne 1 -- stanowisko (_S_), 2 -- zadowolenie z wynagrodzenia w pierwszym okresie (_W1_) oraz 3 -- wykształcenie (_Wyk_). Szacować będziemy prawdopodobieństwa różnych zdarzeń dwoma modelami, [13 23] oraz [123], a wyniki porównamy do empirycznych liczności. 
+
+```{r 7w}
+mod7x <- glm(n ~ S + W1 + Wyk + S * Wyk + W1 * Wyk, data = personel.s_w1_wyk, family = poisson)
+mod7y <- glm(n ~ (S + W1 + Wyk) ^ 2, data = personel.s_w1_wyk, family = poisson)
+res7 <- cbind(mod7x$data, fitted_n_x=fitted(mod7x), fitted_n_y=fitted(mod7y)) %>% as.data.frame()
+```
+
+W pierwszym zakładamy, że stanowisko, zadowolenie z wynagrodzenia oraz wykształcenie, mają dowolne rozkłady, a zajmowane stanowisko i zadowolenie z wynagrodzenia są warunkowo niezależne. Użyjemy kodu
+
+```{r code7x, eval=FALSE, echo=TRUE}
+glm(n ~ S + W1 + Wyk + S * Wyk + W1 * Wyk, data = personel.s_p_wyk, family = poisson)
+```
+
+W przypadku drugiego modelu za to wszystkie trzy rozpatrywane zmienne nie są niezależne i żadna z par nie jest warunkowo niezależna. Tu funkcja będzie wywołana następująco:
+
+```{r code7y, eval=FALSE, echo=TRUE}
+glm(n ~ (S + W1 + Wyk) ^ 2, data = personel.s_p_wyk, family = poisson)
+```
+
+Trzy problemy przedstawimy w punktach.
+
+
+
+
+### Punkt (a)
+
+```{r 7a}
+data.denom <- res7 %>% filter(S == 1) %>% select(c(n, fitted_n_x, fitted_n_y)) %>% colSums()
+data.numer <- res7 %>% filter((S == 1) & (W1 == 2)) %>%  select(c(n, fitted_n_x, fitted_n_y)) %>% colSums()
+res.tab <- data.frame("Prawdopodobieństwo" = data.numer / data.denom)
+rownames(res.tab) <- c("Empiryczna wartość","Predykcja modelu [13 23]","Predykcja modelu [123]")
+res.tab %>% kable(caption="Porównanie prawdopodobieństw empirycznych i predykowanych znalezienia się w grupie osób zdecydowanie zadowolonych ze swojego wynagrodzenia, mając stanowisko kierownicze.", label="tab7a")
+```
+
+Chcemy oszacować prawdopodobieństwo, że osoba pracująca na stanowisku kierowniczym jest zdecydowanie zadowolona ze swojego wynagrodzenia. Okazuje się, że model [123] dopasowuje się do danych treningowych lepiej, niż model [13 23]. Należałoby natomiast zapytać, jak sytuacja ma się w przypadku ewentualnego zbioru testowego, gdyż może to być objaw _overfittingu_. Dokładne wyniki prezentujemy w tab. \@ref(tab:tab7a).
+
+### Punkt (b) \label{punkt7b}
+
+```{r 7b}
+data.denom <- res7 %>% filter(Wyk == 1) %>% select(c(n, fitted_n_x, fitted_n_y)) %>% colSums()
+data.numer <- res7 %>% filter((Wyk == 1) & (S == 1)) %>%  select(c(n, fitted_n_x, fitted_n_y)) %>% colSums()
+res.tab <- data.frame("Prawdopodobieństwo" = data.numer / data.denom)
+rownames(res.tab) <- c("Empiryczna wartość","Predykcja modelu [13 23]","Predykcja modelu [123]")
+res.tab %>% kable(caption="Porównanie prawdopodobieństw empirycznych i predykowanych posiadania stanowiska kirowniczego, mając wykształcenie zawodowe.", label="tab7b")
+```
+
+Szacujemy prawdopodobieństwo, iż osoba z wykształceniem zawodowym pracuje na stanowisku kierowniczym. Z tab. \@ref(tab:tab7b) czytamy, iż te prawdopodobieństwa są niezwyke małe. Z zapisywaną zaś precyzją, dla obu modeli i liczb z ankiet, prawdopodobieństwa są takie same.
+
+### Punkt (c)
+
+```{r 7c}
+data.denom <- res7 %>% filter(Wyk == 3) %>% select(c(n, fitted_n_x, fitted_n_y)) %>% colSums()
+data.numer <- res7 %>% filter((Wyk == 3) & (S != 1)) %>%  select(c(n, fitted_n_x, fitted_n_y)) %>% colSums()
+res.tab <- data.frame("Prawdopodobieństwo" = data.numer / data.denom)
+rownames(res.tab) <- c("Empiryczna wartość","Predykcja modelu [13 23]","Predykcja modelu [123]")
+res.tab %>% kable(caption="Porównanie prawdopodobieństw empirycznych i predykowanych nie posiadania stanowiska kierowniczego, mając wyższe wykształcenie.", label="tab7c")
+```
+
+Tym razem patrzymy na sytuację, że osoba z wyższym wykształceniem nie pracuje na stanowisku kierowniczym. Tab. \@ref(tab:tab7c) pokazuje znów zgodne wersje z dokładnością do trzeciego miejsca po przecinku. Oba modele idelanie dopasowują się do treningowych danych.
+
+## Zadanie 8
+
+Tutaj wrócimy do zmiennyc 1 -- stanowisko (_S_), 2 -- płeć (_P_) oraz 3 -- wykształcenie (_Wyk_). Rozważymy model [13 23]. Zobaczymy też jak przewidywania w punkcie (b) mają się do analogicznego szacowania w [punkcie (b) zadania 7](#punkt7b).
+
+W opisywanym modelu -- analogicznie do poprednio rozważanych przypadków -- zakładamy, że stanowisko i płeć są warunkowo niezależne.
+
+Problemy znów wypisujemy jako osobne punkty.
+
+```{r 8}
+mod8 <- glm(n ~ S + P + Wyk + S * Wyk + P * Wyk, data = personel.s_p_wyk, family = poisson)
+res8 <- cbind(mod8$data, fitted_n=fitted(mod8)) %>% as.data.frame()
+```
+
+
+### Punkt (a)
+
+```{r 8a}
+data.denom <- res8 %>% filter(S == 1) %>% select(c(n, fitted_n)) %>% colSums()
+data.numer <- res8 %>% filter((S == 1) & (P == "K")) %>%  select(c(n, fitted_n)) %>% colSums()
+res.tab <- data.frame("Prawdopodobieństwo" = data.numer / data.denom)
+rownames(res.tab) <- c("Empiryczna wartość","Predykcja modelu [13 23]")
+res.tab %>% kable(caption="Porównanie prawdopodobieństw empirycznych i predykowanych posiadania płci żeńskiej, pracując na stanowisku kierowniczym.", label="tab8a")
+```
+
+Oceniamy prawdopodobieństwo, że osoba pracująca na stanowisku kierowniczym jest kobietą. Wyniki takich przewidywań w oparciu o model log-liniowy, z tab. \@ref(tab:tab8a), dość mocno odbiegają jednak bezpośredniego wyniku z danych. 
+
+### Punkt (b)
+
+```{r 8b}
+data.denom <- res8 %>% filter(Wyk == 1) %>% select(c(n, fitted_n)) %>% colSums()
+data.numer <- res8 %>% filter((Wyk == 1) & (S == 1)) %>%  select(c(n, fitted_n)) %>% colSums()
+res.tab <- data.frame("Prawdopodobieństwo" = data.numer / data.denom)
+rownames(res.tab) <- c("Empiryczna wartość","Predykcja modelu [13 23]")
+res.tab %>% kable(caption="Porównanie prawdopodobieństw empirycznych i predykowanych pracy na stanowisku kierowniczym, mając wykształcenie zawodowe.", label="tab8b")
+```
+
+Szukamy prawdopodobieństwa, że osoba z wykształceniem zawodowym pracuje na stanowisku kierowniczym. Zauważmy, iż jest to taki sam problem jak w zadaniu poprzednim, choć modele log-liniowe się różnią. Oszacowane prawdopodobieństwa są zaś w obu przypadkach z zapisywaną dokładnością identyczne. Widimy to porównując tab. \@ref(tab:tab7b) oraz tab. \@ref(tab:tab8b).
+
+### Punkt (c)
+
+```{r 8c}
+data.denom <- res8 %>% filter(Wyk == 3) %>% select(c(n, fitted_n)) %>% colSums()
+data.numer <- res8 %>% filter((Wyk == 3) & (P == "M")) %>%  select(c(n, fitted_n)) %>% colSums()
+res.tab <- data.frame("Prawdopodobieństwo" = data.numer / data.denom)
+rownames(res.tab) <- c("Empiryczna wartość","Predykcja modelu [13 23]")
+res.tab %>% kable(caption="Porównanie prawdopodobieństw empirycznych i predykowanych posiadania płci męskiej, mając wyższe wykształcenie.", label="tab8c")
+```
+
+Patrzymy teraz jeszcze na prawdopodobieństwo, że osoba z wykształceniem wyższym jest mężczyzną. Korespondujące prawdopodobieństwa z tab. \@ref(tab:tab8c) sugerują, że wśród pracowników tej firmy z wykształceniem wyższym, lekko ponad trzecia część to mężczyźni.
+
+
+# Część III
+
+## Zadanie 9
+
+W tym zadaniu, z użyciem funkcji `anova` zweryfikujemy szereg hipotez o niezależności. Pisząc skrótowo symbole modeli, będziemy oczywiście trzymać się konwencji kolejności zmiennych, w której zostały one na początku podane.
+
+### Punkt (a)
+
+```{r 9a}
+mod9a.0 <- glm(n ~ S + W1 + Wyk, data = personel.s_w1_wyk, family = poisson)
+mod9a.1 <- glm(n ~  S + W1 * Wyk, data = personel.s_w1_wyk, family = poisson)
+mod9a.2 <- glm(n ~ (S + W1 + Wyk) ** 2, data = personel.s_w1_wyk, family = poisson)
+
+test <- anova(mod9a.0, mod9a.1)
+p9a.1 <- 1 - pchisq(test$Deviance[2], df = test$Df[2])
+test <- anova(mod9a.0, mod9a.2)
+p9a.2 <- 1 - pchisq(test$Deviance[2], df = test$Df[2])
+```
+
+Zaczniemy od hipotezy, iż zmienne losowe _S_, _W1_ i _Wyk_ są wzajemnie niezależne. Testujemy $H_0:$ [1 2 3] przeciwko dwom alternatywom -- [1 23] oraz [123]. Modele dopasowujemy więc następującymi liniami kodu:
+
+```{r, eval=FALSE, echo=TRUE}
+mod9a.0 <- glm(n ~ S + W1 + Wyk, data = personel.s_w1_wyk, family = poisson)
+mod9a.1 <- glm(n ~  S + W1 * Wyk, data = personel.s_w1_wyk, family = poisson)
+mod9a.2 <- glm(n ~ (S + W1 + Wyk) ** 2, data = personel.s_w1_wyk, family = poisson)
+```
+
+Okazuje się, że otrzymujemy odpowiednio do podanej kolejności p-wartości $`r p9a.1`$ oraz $`r p9a.2`$. Obie są mniejsze od poziomu $\alpha = 0.05$, zatem hipotezę zerową odrzucamy.
+
+
+### Punkt (b)
+
+```{r 9b}
+mod9b.0 <- glm(n ~ W1 + S * Wyk, data = personel.s_w1_wyk, family = poisson)
+mod9b.1 <- glm(n ~ S * W1 + S * Wyk, data = personel.s_w1_wyk, family = poisson)
+mod9b.2 <- glm(n ~ (S + W1 + Wyk) ** 2, data = personel.s_w1_wyk, family = poisson)
+
+test <- anova(mod9b.0, mod9b.1)
+p9b.1 <- 1 - pchisq(test$Deviance[2], df = test$Df[2])
+test <- anova(mod9b.0, mod9b.2)
+p9b.2 <- 1 - pchisq(test$Deviance[2], df = test$Df[2])
+```
+
+Jeżeli chodzi o to, czy zmienna losowa _W1_ jest niezależna od pary zmiennych _S1_ i _Wyk_, to przeciwko musimy hipotezie [2 13] przetestować przykładowo $H_{1,a}:$ [12 13] oraz  $H_{1,a}:$ [123].
+
+```{r, eval=FALSE, echo=TRUE}
+mod9b.0 <- glm(n ~ W1 + S * Wyk, data = personel.s_w1_wyk, family = poisson)
+mod9b.1 <- glm(n ~ S * W1 + S * Wyk, data = personel.s_w1_wyk, family = poisson)
+mod9b.2 <- glm(n ~ (S + W1 + Wyk) ** 2, data = personel.s_w1_wyk, family = poisson)
+```
+
+Wynikowe wartości poziomu krytycznego -- odpowiednio $`r p9b.1`$ i $`r p9b.2`$ -- są podstawą do odrzucenia przedstawionej hipotezy zerowej. 
+
+### Punkt (c)
+
+```{r 9c}
+mod9c.0 <- glm(n ~ S * Wyk + W1 * Wyk, data = personel.s_w1_wyk, family = poisson)
+mod9c.1 <- glm(n ~ (S + W1 + Wyk) ^ 2, data = personel.s_w1_wyk, family = poisson)
+
+test <- anova(mod9c.0, mod9c.1)
+p9c.1 <- 1 - pchisq(test$Deviance[2], df = test$Df[2])
+```
+
+Dalej, zastanowimy się nad niezależnością zmiennej losowej _W1_ od zmiennej _S_, przy ustalonej wartości zmiennej _Wyk_. Mówimy tutaj o hipotezie zerowej postaci [13 23]. W związku z tym, iż z odgórnego założenia o nadmodelach, jako testowanych obiektach, pozostaniemy tylko przy alternatywie [123]. Tutaj już duża p-wartość ($`r p9c.1`$) nie daje podstaw do odrzucenia hipotezy, że zmienne są modelowane na sposób [13 23].
+
+```{r, eval=FALSE, echo=TRUE}
+mod9c.0 <- glm(n ~ S * Wyk + W1 * Wyk, data = personel.s_w1_wyk, family = poisson)
+mod9c.1 <- glm(n ~ (S + W1 + Wyk) ^ 2, data = personel.s_w1_wyk, family = poisson)
+```
+
+### Punkt (e)
+
+```{r 9e}
+mod9e.0 <- glm(n ~ S * Wyk + P * Wyk, data = personel.s_p_wyk, family = poisson)
+mod9e.1 <- glm(n ~ (S + P + Wyk) ^ 2, data = personel.s_p_wyk, family = poisson)
+
+test <- anova(mod9e.0, mod9e.1)
+p9e.1 <- 1 - pchisq(test$Deviance[2], df = test$Df[2])
+```
+
+Jako ostatnią, weźmiemy hipotezę o niezależności zmiennej losowej _S_ od zmiennej _P_, przy ustalonej wartości zmiennej _Wyk_. Tworzymy więc modele:
+
+```{r, eval=FALSE, echo=TRUE}
+mod9d.0 <- glm(n ~ S * Wyk + P * Wyk, data = personel.s_p_wyk, family = poisson)
+mod9d.1 <- glm(n ~ (S + P + Wyk) ^ 2, data = personel.s_p_wyk, family = poisson)
+```
+
+Hipotezą zerową jest (z kolejnością _S_, _P_, _Wyk_) [13 23], a alternatywną [123]. Otrzymana p-wartość jest równa $`r p9e.1`$, co oznacza, iż odrzucamy hipotezę zerową, na korzyść stwierdzenia, iż wszystkie zmienne są parami zależne.
+
+# Część IV
+
+## Zadanie 10
+
+Dwa zadania kończące listę obowiązkowego zakresu raportu, polegają na wyborze modelu dla zestawu zmiennych, w oparciu o testy, kryterium AIC oraz kryterium BIC.
+
+W pierwszym przypadku zmiennymi będą _A1_, _W1_ oraz _P_.
+
+```{r 10}
+# a <- function (v1, v2, v3) {
+#   return(c(
+#     n ~ v1,
+#     n ~ v2,
+#     n ~ v3,
+#     n ~ v1 + v2,
+#     n ~ v1 + v3,
+#     n ~ v2 + v3,
+#     n ~ v1 * v1,
+#     n ~ v1 * v3,
+#     n ~ v2 * v3,
+#     n ~ v1 + v2 + v3
+#   ))
+# }
+# 
+# personel.a1_w1_p <- personel %>% group_by(A1, W1, P, .drop=F) %>% count()
+# mod10aa.1glm(n ~ A1, data = personel.a1_w1_p, family = poisson)
+# mod10aa.1 <- glm(n ~ W1, data = personel.a1_w1_p, family = poisson)
+# mod10aa.1 <- glm(n ~ P, data = personel.a1_w1_p, family = poisson)
+# mod10aa.1 <- glm(n ~ A1 + W1, data = personel.a1_w1_p, family = poisson)
+# mod10aa.1 <- glm(n ~ A1 + W1, data = personel.a1_w1_p, family = poisson)
+# mod10aa.1 <- glm(n ~ A1 + W1, data = personel.a1_w1_p, family = poisson)
+# mod10aa.1 <- glm(n ~ A1 + W1, data = personel.a1_w1_p, family = poisson)
+# mod10aa.1 <- glm(n ~ A1 + W1, data = personel.a1_w1_p, family = poisson)
+# 
+# f <- function(x){
+#     form <- as.formula(paste("n", x, sep = " ~ "))
+#     glm(form, data = personel.a1_w1_p)
+# }
+# f(A1 + W1)
+# glm(n ~ A1 + W1, data = personel.a1_w1_p, family = poisson)
+
+
+
+
+
+# są wszystkie + i sprawdzamy czy jak dołaczymy jakas interakcje to będzie istotne statystycznie
+# jeżeli odrzucona h0 to nowy staje się lepszy 
+# jak nie odrzucimy to próbujemy dołączyć inną h1 
+
+# czyli glm do dopasowania -> anova i pwartość
+# 
+# w kryteriach przy każdym 2 podejścia; 
+# -np hierarchincznie uporządkowane, patrzymy na wszystkie możliwe i patrzymy to dla którego NAJMNIEJSZE KRYTERIUM
+# -krokowo. wychodzimy od pewnego modelu i usuwamy lub dodajemy aż powoduje zmniejszenie. jak nie powoduje to koniec tematu
+# funkcja `step`
+
+
+# ------------------
+# wybór w oparciu o testy
+# 0 okreslamy model pocz.
+# przzeprowadzamy testy  z odpowiednimi H0 i H1
+# H0 [1 2 3] H1 [1 23] -> odrzucamy h0 to np h0: [1 23] h1 [12 23] itd
+
+
+# a tak to AIC(model), BIC(model), step(..., direction=...)
+# można zacząć od tego co ma wszystkie i się cofamy (direction)
+```
+
+%%%%%%%%%%%%%%%
+
+## Zadanie 11
+
+W drugim z zadań, rozpatrujemy zmienne _D_, _A1_ oraz _P_.
+
+```{r 11}
+personel.d_a1_p <- personel %>% group_by(D, A1, P, .drop=F) %>% count()
+```
+
+%%%%%%%%%%%%%%
+
+# Podsumowanie
+
+Reasumując, udało nam się przyjrzeć działaniu modeli symetrii, stosując je do analizy zmian charakteru zjawisk w czasie. Dwa z tych testów wnikliwie zbadaliśmy pod kątem ich mocy. Poza tym, poruszyliśmy wiele aspektów związanych z modelami log-liniowymi. Obserwowaliśmy oraz porównywaliśmy rezultaty dopasowań w różnych przypadkach, a same przypadki modeli za każdym razem interpretowaliśmy. Potem, stosowaliśmy takie modele do szacowania prawdopodobieństw, a także niezależności ????????????????????????????????????. Na końcu poruszyliśmy też kwestię kryteriów wyboru modelu.
+
+Zestaw narzędzi, którego używaliśmy, jest kolejna część przybornika pełnego technik, umożliwiających coraz lepszą analizę danych ankietowych. Forma zaś pracy z tymi narzędziami, pozwoliła nam je nie tylko zaprezentować, ale także doskonale zrozumieć.
+
